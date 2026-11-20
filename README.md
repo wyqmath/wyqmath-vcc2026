@@ -3,6 +3,10 @@
 A reference-transfer method for predicting single-cell RNA count distributions
 after gene perturbation in the 2026 Virtual Cell Challenge.
 
+![Workflow for predicting single-cell expression from public perturbation studies and challenge control cells](graphical-abstract.png)
+
+*Graphical abstract generated with GPT.*
+
 Our best submission achieved an **overall score of 0.1631 and ranked 228th
 of 806**. It combines eight reference datasets or conditions with adjustments
 for 15 pairs of cell background and target gene. An experimental version adds
