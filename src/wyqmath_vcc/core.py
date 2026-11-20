@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from operator import index
 
 import numpy as np
@@ -91,6 +91,7 @@ def predict_context(
     branch: str,
     *,
     cells_per_target: int = 400,
+    source_effects: Mapping[int, np.ndarray] | None = None,
 ) -> Iterator[sparse.csr_matrix]:
     if not isinstance(branch, str) or branch not in ("A", "B"):
         raise ValueError("branch must be 'A' or 'B'")
@@ -111,6 +112,12 @@ def predict_context(
         raise ValueError("admitted must be a bool ndarray of shape (8, targets)")
     if not isinstance(present, np.ndarray) or present.dtype != bool or present.shape != (8, ng):
         raise ValueError("present must be a bool ndarray of shape (8, genes)")
+    if source_effects:
+        if branch != "B":
+            raise ValueError("Source effect overrides require branch B")
+        for target, effects in source_effects.items():
+            if not 0 <= target < nt or effects.shape != (ng,) or np.isinf(effects).any():
+                raise ValueError("Source effect override does not match the prediction axes")
     if not sparse.issparse(counts) or counts.format != "csr":
         raise ValueError("counts must be a scipy CSR matrix or array")
     if counts.shape[0] < cells or counts.shape[1] != ng:
@@ -123,8 +130,13 @@ def predict_context(
     lam, q0, template = _make_query(counts, cells)
     rng = np.random.Generator(np.random.PCG64(0))
     for ti in range(nt):
-        sampled, totals = sample_pair(old[ti], new[ti], gate[ti], lam, template, rng, branch)
-        target, _ = target_probability(q0, new[ti], totals)
+        effect, changed = new[ti], gate[ti]
+        if source_effects and ti in source_effects:
+            source = source_effects[ti]
+            effect = np.where(np.abs(source) >= 0.5, source, effect)
+            changed = effect != old[ti]
+        sampled, totals = sample_pair(old[ti], effect, changed, lam, template, rng, branch)
+        target, _ = target_probability(q0, effect, totals)
         depths = sampled.sum(1, dtype=np.int64)
         if not (depths > 0).all():
             raise ValueError("Positive sampled cell depths required")

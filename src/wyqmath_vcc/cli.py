@@ -12,6 +12,7 @@ import pandas as pd
 from scipy import sparse
 
 from .core import SOURCES, predict_context
+from .reference import estimate_source, prepare_bank
 
 
 CONTEXTS = {"D": "A", "E": "B", "F": "B"}
@@ -24,6 +25,7 @@ PATCH_TARGETS = {
     "E": ("PHF23", "PRMT6", "VIM"),
     "F": ("CUX1", "E2F1", "GATAD2B", "HMGB2", "PHF14", "PRDM15", "PTBP2"),
 }
+EXPERIMENTAL_TARGETS = {"E": ("NR2C2", "ADNP", "ZBTB48")}
 
 
 def read_table(path, required):
@@ -129,7 +131,6 @@ def checked_block(matrix, cells, genes):
 
 
 def read_patch(path, cells, genes):
-
     with np.load(path, allow_pickle=False) as z:
         if "format" in z.files:
             matrix = sparse.load_npz(path)
@@ -140,32 +141,56 @@ def read_patch(path, cells, genes):
     return checked_block(matrix, cells, genes)
 
 
-def load_patches(directory, panels):
-    if directory is None:
-        return {}
+def load_patches(directory, panels, pairs):
     paths = {
         (context, target): directory / context / f"{target}.npz"
-        for context, targets in PATCH_TARGETS.items()
-        for target in targets
+        for context, target in pairs
     }
     for (context, target), path in paths.items():
         if target not in panels[context]:
-            raise ValueError(f"Published override {context}/{target} is not on this panel")
+            raise ValueError(f"Override {context}/{target} is not on this panel")
         if not path.is_file():
-            raise ValueError(f"Expected all 15 published overrides. Missing {path}")
+            raise ValueError(f"Expected {len(paths)} override blocks. Missing {path}")
     return {key: read_patch(path, CELLS_PER_TARGET, GENES) for key, path in paths.items()}
 
 
-def predicted_blocks(bundle, panels, genes, bank, patches):
+def load_experimental_effects(directory, genes, panels):
+    effects_by_context = {}
+    for context, targets in EXPERIMENTAL_TARGETS.items():
+        context_effects = effects_by_context.setdefault(context, {})
+        panel_index = unique_index(panels[context], f"{context} targets")
+        for target in targets:
+            with np.load(directory / f"{target}.npz", allow_pickle=False) as source:
+                source_genes = source["genes"]
+                source_targets = source["targets"]
+                effects = source["effects"]
+            if (source_genes.ndim != 1 or source_genes.dtype.kind != "U"
+                    or source_targets.dtype.kind != "U" or source_targets.tolist() != [target]
+                    or effects.shape != (1, len(source_genes))
+                    or effects.dtype.kind != "f" or effects.dtype.itemsize not in (4, 8)
+                    or not np.isfinite(effects).all()):
+                raise ValueError(f"Invalid single-target effects for {context}/{target}")
+            source_index = unique_index(source_genes, f"{target} source genes")
+            aligned = np.full(len(genes), np.nan)
+            for i, gene in enumerate(genes):
+                if gene in source_index:
+                    aligned[i] = effects[0, source_index[gene]]
+            if not np.any((np.abs(aligned) >= 0.5) & (np.asarray(genes) != target)):
+                raise ValueError(f"No supported non-target genes for {context}/{target}")
+            context_effects[panel_index[target]] = aligned
+    return effects_by_context
+
+
+def predicted_blocks(bundle, panels, genes, bank, patches, source_effects):
     raw, admitted, present, index = bank
     for context, branch in CONTEXTS.items():
         indices = [index[target] for target in panels[context]]
         blocks = predict_context(
             load_controls(bundle, context, genes), raw[:, indices], admitted[:, indices],
             present, branch, cells_per_target=CELLS_PER_TARGET,
+            source_effects=source_effects.get(context),
         )
         for target, block in zip(panels[context], blocks, strict=True):
-
             yield patches.get((context, target), block)
 
 
@@ -264,10 +289,24 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     synthetic = commands.add_parser("smoke", help="run the predictor and H5AD writer on synthetic counts")
     synthetic.add_argument("--output", type=Path, required=True)
+    estimate = commands.add_parser("estimate-source", help="estimate target effects from a gene count table")
+    estimate.add_argument("--counts", type=Path, required=True)
+    estimate.add_argument("--samples", type=Path, required=True)
+    estimate.add_argument("--normalization", choices=("pooled-cp10k", "library-mean-cp10k"),
+                          default="pooled-cp10k")
+    estimate.add_argument("--pseudocount", type=float, default=0.1)
+    estimate.add_argument("--output", type=Path, required=True)
+    prepare = commands.add_parser("prepare-bank", help="align eight reference channels to the final panel")
+    prepare.add_argument("--controls", type=Path, required=True)
+    prepare.add_argument("--sources", type=Path, required=True)
+    prepare.add_argument("--output", type=Path, required=True)
     predict = commands.add_parser("predict", help="generate predictions on the official final panel")
     predict.add_argument("--controls", type=Path, required=True)
     predict.add_argument("--source-bank", type=Path, required=True)
-    predict.add_argument("--patches", type=Path, help="directory containing all 15 final override blocks")
+    predict.add_argument("--variant", choices=("backbone", "final15", "experimental18"))
+    predict.add_argument("--patches", type=Path, help="directory containing prepared count override blocks")
+    predict.add_argument("--experimental-effects", type=Path,
+                         help="regenerate the three experimental blocks from mapped source effects")
     predict.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -276,12 +315,34 @@ def main(argv=None):
             return
         if args.output.exists():
             raise FileExistsError(args.output)
+        if args.command == "estimate-source":
+            estimate_source(args.counts, args.samples, args.output, normalization=args.normalization,
+                            pseudocount=args.pseudocount)
+            return
         genes, panels = read_panel(args.controls)
-        patches = load_patches(args.patches, panels)
+        if args.command == "prepare-bank":
+            targets = list(dict.fromkeys(target for panel in panels.values() for target in panel))
+            prepare_bank(args.sources, genes, targets, args.output)
+            return
+        variant = args.variant or ("final15" if args.patches else "backbone")
+        requires_patches = variant in ("final15", "experimental18")
+        if requires_patches != (args.patches is not None):
+            raise ValueError("Use --patches for final15 or experimental18 only")
+        if args.experimental_effects and variant != "experimental18":
+            raise ValueError("--experimental-effects requires --variant experimental18")
+        patches, source_effects = {}, {}
+        if args.patches:
+            pairs = [(context, target) for context, targets in PATCH_TARGETS.items() for target in targets]
+            if args.experimental_effects:
+                source_effects = load_experimental_effects(args.experimental_effects, genes, panels)
+            elif variant == "experimental18":
+                pairs.extend((context, target) for context, targets in EXPERIMENTAL_TARGETS.items()
+                             for target in targets)
+            patches = load_patches(args.patches, panels, pairs)
         bank = load_bank(args.source_bank, genes, panels)
-        blocks = predicted_blocks(args.controls, panels, genes, bank, patches)
+        blocks = predicted_blocks(args.controls, panels, genes, bank, patches, source_effects)
         write_prediction(args.output, panels, genes, CELLS_PER_TARGET, blocks)
-        print(f"Saved {args.output} with {len(patches)} archived override blocks")
+        print(f"Saved {variant} prediction to {args.output}")
     except (ValueError, OSError, KeyError) as exc:
         parser.exit(1, f"{parser.prog}: {exc}\n")
 
