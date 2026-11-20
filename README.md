@@ -6,7 +6,7 @@ after gene perturbation in the 2026 Virtual Cell Challenge.
 | Method | Prediction recipe | Final test result |
 | --- | --- | --- |
 | Backbone | Same-target effects from eight reference channels, transferred into the official controls | Base generator for Final15 |
-| Final15 | Backbone with 15 context-target blocks replaced using matched public perturbation studies | **Overall 0.163092, rank 228 of 806**, our best official result |
+| Final15 | Backbone with 15 context-target blocks replaced using matched public perturbation studies | **Overall 0.1631, rank 228 of 806**, our best official result |
 | Experimental18 | Final15 plus three independently selected replacements in context E | Lower error on held-out source data for all three targets. No official score. |
 
 [Official final leaderboard](https://virtualcellchallenge.org/leaderboard#final)
@@ -25,8 +25,8 @@ tables identify the public reference experiments.
    not enter the average. The sources use different effect estimators, so
    vector normalization limits the influence of their original units.
 2. **Set the effect magnitude by background.** Multiply the consensus by
-   0.85 times 67.77051441605022 for D or 24.612817569855043 for E and F.
-   D also uses a dose factor of 0.8379070724891897. In D, halve a gene's
+   0.85 times a scale of about 67.77 for D or 24.61 for E and F.
+   D also uses a dose factor of about 0.838. In D, halve a gene's
    effect if at least three sources provide nonzero votes and at least
    two-thirds of those votes oppose the consensus.
 3. **Generate 400 count profiles per target.** Draw 400 distinct control
@@ -113,9 +113,9 @@ after holdout evaluation.
 
 | E target and source | Holdout design | Response MSE | All mapped non-target MSE |
 | --- | --- | ---: | ---: |
-| NR2C2, [GSE299760](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE299760). MCF7 and T47D, 72 h siRNA vs. scrambled, 3 + 3 STAR count libraries per background | Fit on either background and hold out the other | 0.279935 to 0.139792 | 0.043166 to 0.038425 |
-| ADNP, [GSE79395](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE79395). HCT116, siRNA vs. control, 3 + 3 HTSeq count libraries | Nine crossed treatment-control holdouts, with 2 + 2 libraries for each fit | 0.377982 to 0.112217 | 0.027880 to 0.025185 |
-| ZBTB48, [GSE228606](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE228606). HEK293, 72 h siRNA vs. non-targeting control, 2 + 2 RSEM expected-count libraries | Four crossed treatment-control holdouts, with 1 + 1 libraries for each fit | 0.573969 to 0.182750 | 0.077032 to 0.049321 |
+| NR2C2, [GSE299760](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE299760). MCF7 and T47D, 72 h siRNA vs. scrambled, 3 + 3 STAR count libraries per background | Fit on either background and hold out the other | 0.280 to 0.140 | 0.043 to 0.038 |
+| ADNP, [GSE79395](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE79395). HCT116, siRNA vs. control, 3 + 3 HTSeq count libraries | Nine crossed treatment-control holdouts, with 2 + 2 libraries for each fit | 0.378 to 0.112 | 0.028 to 0.025 |
+| ZBTB48, [GSE228606](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE228606). HEK293, 72 h siRNA vs. non-targeting control, 2 + 2 RSEM expected-count libraries | Four crossed treatment-control holdouts, with 1 + 1 libraries for each fit | 0.574 to 0.183 | 0.077 to 0.049 |
 
 The values are mean squared errors before and after the replacement,
 averaged across holdouts. They compare log2 fold changes calculated from
