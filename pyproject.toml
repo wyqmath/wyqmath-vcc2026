@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=67"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wyqmath-vcc2026"
+version = "0.1.0"
+description = "Reference transfer and count synthesis for the wyqmath VCC 2026 entry"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anndata>=0.11,<0.14",
+    "h5py>=3.10,<4",
+    "numpy>=1.26,<3",
+    "pandas>=2.1,<4",
+    "scipy>=1.11,<2",
+]
+
+[project.scripts]
+wyqmath-vcc = "wyqmath_vcc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
